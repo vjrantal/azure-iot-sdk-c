@@ -85,7 +85,7 @@ process_args ()
           case "$arg" in
               "-cl" | "--compileoption" ) save_next_arg=1;;
               "--run-e2e-tests" ) run_e2e_tests=ON;;
-			  "--run-unittests" ) run_unittests=ON;;
+              "--run-unittests" ) run_unittests=ON;;
               "--run-longhaul-tests" ) run_longhaul_tests=ON;;
               "--no-amqp" ) build_amqp=OFF;;
               "--no-http" ) build_http=OFF;;
