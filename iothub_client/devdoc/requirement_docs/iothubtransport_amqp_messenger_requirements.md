@@ -33,22 +33,40 @@ azure_uamqp_c
 		MESSENGER_DISPOSITION_RESULT_ABANDONED
 	} MESSENGER_DISPOSITION_RESULT;
 
-	typedef MESSENGER_DISPOSITION_RESULT(*ON_MESSAGE_RECEIVED)(IOTHUB_MESSAGE_HANDLE message, void* context);
+	typedef MESSENGER_DISPOSITION_RESULT(*ON_NEW_MESSAGE_RECEIVED)(IOTHUB_MESSAGE_HANDLE message, void* context);
 
 	typedef struct MESSENGER_CONFIG_TAG
 	{
 		char* device_id;
 		char* iothub_host_fqdn;
-		PDLIST_ENTRY wait_to_send_list;
 		ON_MESSENGER_STATE_CHANGED_CALLBACK on_state_changed_callback;
 		void* on_state_changed_context;
 	} MESSENGER_CONFIG;
 
 	typedef struct MESSENGER_INSTANCE* MESSENGER_HANDLE;
 
+	typedef enum EVENT_SEND_COMPLETE_RESULT_TAG
+	{
+		EVENT_SEND_COMPLETE_RESULT_OK,
+		EVENT_SEND_COMPLETE_RESULT_ERROR_CANNOT_PARSE,
+		EVENT_SEND_COMPLETE_RESULT_ERROR_FAIL_SENDING,
+		EVENT_SEND_COMPLETE_RESULT_ERROR_TIMEOUT,
+		EVENT_SEND_COMPLETE_RESULT_MESSENGER_DESTROYED
+	} EVENT_SEND_COMPLETE_RESULT;
+
+	typedef void(*ON_EVENT_SEND_COMPLETE)(IOTHUB_MESSAGE_LIST* message, EVENT_SEND_COMPLETE_RESULT result, void* context);
+
+	typedef enum MESSENGER_SEND_STATUS_TAG
+	{
+		MESSENGER_SEND_STATUS_IDLE,
+		MESSENGER_SEND_STATUS_BUSY
+	} MESSENGER_SEND_STATUS;
+
 	extern MESSENGER_HANDLE messenger_create(const MESSENGER_CONFIG* messenger_config);
+	extern int messenger_send_async(MESSENGER_HANDLE messenger_handle, IOTHUB_MESSAGE_LIST* message, ON_EVENT_SEND_COMPLETE on_event_send_complete_callback, const void* context);
 	extern int messenger_subscribe_for_messages(MESSENGER_HANDLE messenger_handle, ON_MESSAGE_RECEIVED on_message_received_callback, void* context);
 	extern int messenger_unsubscribe_for_messages(MESSENGER_HANDLE messenger_handle);
+	extern int messenger_get_send_status(MESSENGER_HANDLE messenger_handle, MESSENGER_SEND_STATUS* send_status);
 	extern int messenger_start(MESSENGER_HANDLE messenger_handle, SESSION_HANDLE session_handle); 
 	extern int messenger_stop(MESSENGER_HANDLE messenger_handle);
 	extern void messenger_do_work(MESSENGER_HANDLE messenger_handle);
@@ -67,17 +85,47 @@ Summary: creates struct instance to store data, checks and stores copies of para
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_001: [**If parameter `messenger_config` is NULL, messenger_create() shall return NULL**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_002: [**If `messenger_config->device_id` is NULL, messenger_create() shall return NULL**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_003: [**If `messenger_config->iothub_host_fqdn` is NULL, messenger_create() shall return NULL**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_004: [**If `messenger_config->wait_to_send_list` is NULL, messenger_create() shall return NULL**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_006: [**messenger_create() shall allocate memory for the messenger instance structure (aka `instance`)**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_007: [**If malloc() fails, messenger_create() shall fail and return NULL**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_008: [**messenger_create() shall save a copy of `messenger_config->device_id` into `instance->device_id`**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_009: [**If STRING_construct() fails, messenger_create() shall fail and return NULL**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_010: [**messenger_create() shall save a copy of `messenger_config->iothub_host_fqdn` into `instance->iothub_host_fqdn`**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_011: [**If STRING_construct() fails, messenger_create() shall fail and return NULL**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_012: [**The pointer `messenger_config->wait_to_send_list` shall be saved into `instance->wait_to_send_list`**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_132: [**`instance->in_progress_list` shall be set using singlylinkedlist_create()**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_133: [**If singlylinkedlist_create() fails, messenger_create() shall fail and return NULL**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_013: [**`messenger_config->on_state_changed_callback` shall be saved into `instance->on_state_changed_callback`**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_014: [**`messenger_config->on_state_changed_context` shall be saved into `instance->on_state_changed_context`**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_015: [**If no failures occurr, messenger_create() shall return a handle to `instance`**]**  
+
+
+### messenger_send_async
+```c
+int messenger_send_async(MESSENGER_HANDLE messenger_handle, IOTHUB_MESSAGE_LIST* message, ON_EVENT_SEND_COMPLETE on_event_send_complete_callback, const void* context);
+```
+
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_134: [**If `messenger_handle` is NULL, messenger_send_async() shall fail and return a non-zero value**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_135: [**If `message` is NULL, messenger_send_async() shall fail and return a non-zero value**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_136: [**If `on_event_send_complete_callback` is NULL, messenger_send_async() shall fail and return a non-zero value**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_137: [**messenger_send_async() shall allocate memory for a SEND_EVENT_TASK structure (aka `task`)**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_138: [**If malloc() fails, messenger_send_async() shall fail and return a non-zero value**]**    
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_100: [**`task` shall be added to `instance->in_progress_list` using singlylinkedlist_add()**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_139: [**If singlylinkedlist_add() fails, messenger_send_async() shall fail and return a non-zero value**]**
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_142: [**If any failure occurs, messenger_send_async() shall free any memory it has allocated**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_143: [**If no failures occur, messenger_send_async() shall return zero**]**  
+
+
+### messenger_get_send_status
+
+```c
+int messenger_get_send_status(MESSENGER_HANDLE messenger_handle, MESSENGER_SEND_STATUS* send_status);
+```
+
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_144: [**If `messenger_handle` is NULL, messenger_get_send_status() shall fail and return a non-zero value**]** 
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_145: [**If `send_status` is NULL, messenger_get_send_status() shall fail and return a non-zero value**]** 
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_146: [**messenger_get_send_status() shall obtain the first item from `instance->in_progress_list` using singlylinkedlist_get_head_item()**]** 
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_147: [**If singlylinkedlist_get_head_item() returns NULL, send_status shall be set to MESSENGER_SEND_STATUS_IDLE**]** 
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_148: [**If singlylinkedlist_get_head_item() returns not NULL, send_status shall be set to MESSENGER_SEND_STATUS_BUSY**]** 
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_149: [**If no failures occur, messenger_get_send_status() shall return 0**]** 
 
 
 ## messenger_subscribe_for_messages
@@ -119,12 +167,36 @@ Summary: informs the messenger instance that an existing uAMQP messagereceiver s
 	extern int messenger_start(MESSENGER_HANDLE messenger_handle, SESSION_HANDLE session_handle); 
 ```
 
-Summary: creates and opens the uAMQP messagesender
-
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_029: [**If `messenger_handle` is NULL, messenger_start() shall fail and return __LINE__**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_030: [**If `session_handle` is NULL, messenger_start() shall fail and return __LINE__**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_031: [**If `instance->state` is not MESSENGER_STATE_STOPPED, messenger_start() shall fail and return __LINE__**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_032: [**`session_handle` shall be saved on `instance->session_handle`, and the `instance` marked as started**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_032: [**`session_handle` shall be saved on `instance->session_handle`**]**   
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_115: [**If no failures occurr, `instance->state` shall be set to MESSENGER_STATE_STARTING, and `instance->on_state_changed_callback` invoked if provided**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_056: [**If no failures occurr, messenger_start() shall return 0**]**  
+
+
+## messenger_stop
+
+```c
+	extern int messenger_stop(MESSENGER_HANDLE messenger_handle);
+```
+
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_057: [**If `messenger_handle` is NULL, messenger_stop() shall fail and return __LINE__**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_058: [**If `instance->state` is MESSENGER_STATE_STOPPED, messenger_stop() shall fail and return __LINE__**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_116: [**`instance->state` shall be set to MESSENGER_STATE_STOPPING, and `instance->on_state_changed_callback` invoked if provided**]**  
+
+
+
+## messenger_do_work
+
+```c
+	extern void messenger_do_work(MESSENGER_HANDLE messenger_handle);
+```
+
+Summary: creates/destroys the uAMQP messagereceiver according to current subscription (messenger_subscribe_for_messages/messenger_unsubscribe_for_messages), sends pending D2C events. 
+
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_065: [**If `messenger_handle` is NULL, messenger_do_work() shall fail and return**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_066: [**If `instance->state` is not MESSENGER_STATE_STARTED, messenger_do_work() shall return**]**  
 
 
 ### Create/start the message sender
@@ -149,9 +221,7 @@ Summary: creates and opens the uAMQP messagesender
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_052: [**If messagesender_create() fails, messenger_start() shall fail and return __LINE__**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_053: [**`instance->message_sender` shall be opened using messagesender_open()**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_054: [**If messagesender_open() fails, messenger_start() shall fail and return __LINE__**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_055: [**Before returning, messenger_start() shall release all the temporary memory it has allocated**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_115: [**If no failures occurr, `instance->state` shall be set to MESSENGER_STATE_STARTING, and `instance->on_state_changed_callback` invoked if provided**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_056: [**If no failures occurr, messenger_start() shall return 0**]**  
+**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_055: [**Before returning, messenger_start() shall release all the temporary memory it has allocated**]** 
 
 
 #### on_event_sender_state_changed_callback
@@ -164,35 +234,13 @@ static void on_event_sender_state_changed_callback(void* context, MESSAGE_SENDER
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_119: [**If the messagesender new state is MESSAGE_SENDER_STATE_ERROR, `instance->state` shall be set to MESSENGER_STATE_ERROR, and `instance->on_state_changed_callback` invoked if provided**]**  
 
 
-## messenger_stop
-
-```c
-	extern int messenger_stop(MESSENGER_HANDLE messenger_handle);
-```
-
-Summary: closes and destroys the uAMQP messagesender and messagereceiver (and their respective components).
-
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_057: [**If `messenger_handle` is NULL, messenger_stop() shall fail and return __LINE__**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_058: [**If `instance->state` is MESSENGER_STATE_STOPPED, messenger_start() shall fail and return __LINE__**]**  
+### Destroy the message sender
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_060: [**`instance->message_sender` shall be destroyed using messagesender_destroy()**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_061: [**`instance->message_receiver` shall be closed using messagereceiver_close()**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_062: [**`instance->message_receiver` shall be destroyed using messagereceiver_destroy()**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_063: [**`instance->sender_link` shall be destroyed using link_destroy()**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_064: [**`instance->receiver_link` shall be destroyed using link_destroy()**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_116: [**`instance->state` shall be set to MESSENGER_STATE_STOPPED, and `instance->on_state_changed_callback` invoked if provided**]**  
 
-
-
-## messenger_do_work
-
-```c
-	extern void messenger_do_work(MESSENGER_HANDLE messenger_handle);
-```
-
-Summary: creates/destroys the uAMQP messagereceiver according to current subscription (messenger_subscribe_for_messages/messenger_unsubscribe_for_messages), sends pending D2C events. 
-
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_065: [**If `messenger_handle` is NULL, messenger_do_work() shall fail and return**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_066: [**If `instance->state` is not MESSENGER_STATE_STARTED, messenger_do_work() shall return**]**  
 
 
 ### Create a message receiver
@@ -257,19 +305,7 @@ static AMQP_VALUE on_message_received_internal_callback(const void* context, MES
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_098: [**`instance->receiver_link` shall be set to NULL**]**  
 
 
-### Send pending events
-
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_100: [**messenger_do_work() shall move each event to be sent from `instance->wait_to_send_list` to `instance->in_progress_list`**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_101: [**A MESSAGE_HANDLE shall be obtained out of the event's IOTHUB_MESSAGE_HANDLE instance by using message_create_from_iothub_message()**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_102: [**If message_create_from_iothub_message() fails, `MESSAGE_HANDLE->callback` shall be invoked, if defined, with result IOTHUB_CLIENT_CONFIRMATION_ERROR**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_103: [**If message_create_from_iothub_message() fails, messenger_do_work() shall fail and return**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_104: [**The MESSAGE_HANDLE shall be submitted for sending using messagesender_send(), passing `on_message_send_complete_callback`**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_105: [**If messagesender_send() fails, the event shall be rolled back from `instance->in_progress_list` to `instance->wait_to_send_list`**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_106: [**The MESSAGE_HANDLE shall be destroyed using message_destroy().**]**  
-**SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_131: [**If messenger_do_work() fail sending events for `instance->event_send_retry_limit` times, it shall invoke `instance->on_state_changed_callback`, if provided, with error code MESSENGER_STATE_ERROR**]**  
-
-
-#### on_message_send_complete_callback
+#### internal_on_event_send_complete_callback
 
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_107: [**If no failure occurs, `MESSAGE_HANDLE->callback` shall be invoked with result IOTHUB_CLIENT_CONFIRMATION_OK**]**  
 **SRS_IOTHUBTRANSPORT_AMQP_MESSENGER_09_108: [**If a failure occurred, `MESSAGE_HANDLE->callback` shall be invoked with result IOTHUB_CLIENT_CONFIRMATION_ERROR**]**  
