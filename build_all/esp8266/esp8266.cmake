@@ -9,6 +9,8 @@ set(ESP8266_RTOS_SDK $ENV{ESP8266_RTOS_SDK})
 
 # this is the location of the toolchain targeting the ESP8266
 set(CMAKE_C_COMPILER xtensa-lx106-elf-gcc)
+# setting the cxx compiler to some binary that exists so that cmake does not complain
+set(CMAKE_CXX_COMPILER xtensa-lx106-elf-gcc)
 
 # this is the file system root of the target
 set(CMAKE_FIND_ROOT_PATH ${ESP8266_RTOS_SDK})
